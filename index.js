@@ -187,6 +187,8 @@ function parseCombo(combo_str) {
 
 const raw_hold_key = (process.env.HOLD_KEY || '').trim();
 const raw_toggle_keys = (process.env.TOGGLE_KEYS || '').trim();
+const raw_translate_hold_key = (process.env.TRANSLATE_HOLD_KEY || '').trim();
+const raw_translate_toggle_keys = (process.env.TRANSLATE_TOGGLE_KEYS || '').trim();
 
 const hold_combo = parseCombo(raw_hold_key);
 const toggle_combos = raw_toggle_keys
@@ -196,26 +198,18 @@ const toggle_combos = raw_toggle_keys
 	.map(s => parseCombo(s))
 	.filter(combo => combo !== null);
 
-if (!hold_combo && toggle_combos.length === 0) {
-	console.error('Error: No valid keys or combinations are configured. Please check HOLD_KEY or TOGGLE_KEYS in .env');
+const translate_hold_combo = parseCombo(raw_translate_hold_key);
+const translate_toggle_combos = raw_translate_toggle_keys
+	.split(',')
+	.map(s => s.trim())
+	.filter(s => s.length > 0)
+	.map(s => parseCombo(s))
+	.filter(combo => combo !== null);
+
+if (!hold_combo && toggle_combos.length === 0 && !translate_hold_combo && translate_toggle_combos.length === 0) {
+	console.error('Error: No valid keys or combinations are configured. Please check HOLD_KEY, TOGGLE_KEYS, TRANSLATE_HOLD_KEY, or TRANSLATE_TOGGLE_KEYS in .env');
 	process.exit(1);
 }
-
-console.log('--- Novoice Configuration ---');
-console.log('Gemini Model:', gemini_model);
-console.log('Hold Combo:', hold_combo ? `${raw_hold_key} (codes: ${hold_combo.join('+')})` : 'None');
-console.log(
-	'Toggle Combos:',
-	toggle_combos.length > 0
-		? toggle_combos
-				.map(combo => {
-					const names_str = combo.map(c => names[c]).join('+');
-					return `${names_str} (codes: ${combo.join('+')})`;
-				})
-				.join(', ')
-		: 'None'
-);
-console.log('-----------------------------');
 
 // 3. HYPRLAND UI CONTROL (ACTIVE BORDER DECORATOR)
 let default_border_color = '0xff82aaff 0xff3b8eea 45deg'; // Vibrant cyan-magenta gradient fallback
@@ -251,7 +245,6 @@ function retrieveDefaultBorderColor() {
 	}
 }
 retrieveDefaultBorderColor();
-console.log('Default Hyprland active border color:', default_border_color);
 
 function setBorderColor(color) {
 	try {
@@ -310,7 +303,7 @@ function trimSilence() {
 }
 
 // 5. GEMINI API & YDOTOOL TYPING INTEGRATION
-function sendToGemini(api_key, model, audio_base64, window_class, window_title) {
+function sendToGemini(api_key, model, audio_base64, window_class, window_title, should_translate = false) {
 	return new Promise((resolve, reject) => {
 		const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${api_key}`;
 
@@ -322,7 +315,14 @@ Instructions:
 - Remove minor filler words (like 'um', 'uh', 'like', 'you know') and repetitions or stutters unless they are clearly intentional.`;
 
 		const spoken_lang = process.env.LANGUAGE;
-		if (spoken_lang) prompt += `\n- Spoken Language: The speech is spoken in "${spoken_lang}". Please transcribe accurately in "${spoken_lang}".`;
+		if (should_translate) {
+			if (spoken_lang) {
+				prompt += `\n- Spoken Language: The speech is spoken in "${spoken_lang}".`;
+			}
+			prompt += `\n- Translation Request: Translate the spoken speech to English. Output ONLY the clean, final translated English text, maintaining the requested formatting, capitalization, and punctuation rules. Do NOT output the original language; translate it completely to English.`;
+		} else if (spoken_lang) {
+			prompt += `\n- Spoken Language: The speech is spoken in "${spoken_lang}". Please transcribe accurately in "${spoken_lang}".`;
+		}
 
 		prompt += `\n- Context: The user is typing inside an active window with class '${window_class}' and title '${window_title}'. Format/capitalize code tokens, acronyms, or proper names accordingly if appropriate.`;
 
@@ -540,13 +540,16 @@ async function handleError(error) {
 }
 
 // 6. PIPELINE RECORDING STATE TRANSITIONS
-function startRecording(trigger_type, trigger_key) {
+let active_translation_mode = false;
+
+function startRecording(trigger_type, trigger_key, should_translate = false) {
 	if (is_recording || is_processing) return;
 	is_recording = true;
 	active_trigger_type = trigger_type;
 	active_trigger_key = trigger_key;
+	active_translation_mode = should_translate;
 
-	console.log(`\n=== Recording Started (${trigger_type} via ${names[trigger_key] || trigger_key}) ===`);
+	console.log(`\n=== Recording Started (${trigger_type} via ${names[trigger_key] || trigger_key}${should_translate ? ' - TRANSLATE TO ENGLISH' : ''}) ===`);
 
 	// Set border to Green
 	setBorderColor('0xff00ff00');
@@ -599,8 +602,8 @@ function startRecording(trigger_type, trigger_key) {
 				encoding: 'base64'
 			});
 
-			console.log('Sending request to Google Gemini API...');
-			const text = await sendToGemini(gemini_api_key, gemini_model, audio_base64, window_context.class, window_context.title);
+			console.log('Sending request to Google Gemini API (Translation Mode: ' + (active_translation_mode ? 'ON' : 'OFF') + ')...');
+			const text = await sendToGemini(gemini_api_key, gemini_model, audio_base64, window_context.class, window_context.title, active_translation_mode);
 
 			console.log(`Received transcription: "${text}"`);
 			if (text && text.trim().length > 0) {
@@ -633,6 +636,46 @@ function stopRecording() {
 
 const held_keys = new Set();
 
+function keysMatch(expected_code, actual_code) {
+	if (expected_code === actual_code) return true;
+	const shift_codes = [42, 54];
+	const ctrl_codes = [29, 97];
+	const alt_codes = [56, 100];
+	if (shift_codes.includes(expected_code) && shift_codes.includes(actual_code)) return true;
+	if (ctrl_codes.includes(expected_code) && ctrl_codes.includes(actual_code)) return true;
+	if (alt_codes.includes(expected_code) && alt_codes.includes(actual_code)) return true;
+	return false;
+}
+
+function hasHeldKey(expected_code) {
+	for (const held of held_keys) {
+		if (keysMatch(expected_code, held)) return true;
+	}
+	return false;
+}
+
+function comboMatches(combo, actual_code) {
+	let contains_actual = false;
+	for (const expected_code of combo) {
+		if (keysMatch(expected_code, actual_code)) {
+			contains_actual = true;
+			break;
+		}
+	}
+	if (!contains_actual) return false;
+
+	return combo.every(expected_code => {
+		return keysMatch(expected_code, actual_code) || hasHeldKey(expected_code);
+	});
+}
+
+function comboContainsKey(combo, actual_code) {
+	for (const expected_code of combo) {
+		if (keysMatch(expected_code, actual_code)) return true;
+	}
+	return false;
+}
+
 // 7. KEYBOARD EVENT ROUTER
 function handleKeyEvent(code, value) {
 	// Ignore key repeats (value === 2)
@@ -640,11 +683,18 @@ function handleKeyEvent(code, value) {
 
 	if (value === 1) {
 		// Key Press
+		let translate_toggle_matched = false;
+		for (const combo of translate_toggle_combos) {
+			if (comboMatches(combo, code)) {
+				translate_toggle_matched = true;
+				break;
+			}
+		}
+
 		let toggle_matched = false;
-		for (const combo of toggle_combos) {
-			if (combo.includes(code)) {
-				const other_keys_held = combo.every(c => c === code || held_keys.has(c));
-				if (other_keys_held) {
+		if (!translate_toggle_matched) {
+			for (const combo of toggle_combos) {
+				if (comboMatches(combo, code)) {
 					toggle_matched = true;
 					break;
 				}
@@ -658,17 +708,31 @@ function handleKeyEvent(code, value) {
 			return;
 		}
 
-		if (toggle_matched) {
+		if (translate_toggle_matched) {
 			if (!is_recording) {
-				startRecording('toggle', code);
+				startRecording('translate_toggle', code, true);
 			} else {
 				stopRecording();
 			}
-		} else if (hold_combo && hold_combo.includes(code)) {
-			const other_keys_held = hold_combo.every(c => c === code || held_keys.has(c));
-			if (other_keys_held) {
+		} else if (toggle_matched) {
+			if (!is_recording) {
+				startRecording('toggle', code, false);
+			} else {
+				stopRecording();
+			}
+		} else {
+			let translate_hold_matched = false;
+			if (translate_hold_combo && comboMatches(translate_hold_combo, code)) {
+				translate_hold_matched = true;
+			}
+
+			if (translate_hold_matched) {
 				if (!is_recording) {
-					startRecording('hold', code);
+					startRecording('translate_hold', code, true);
+				}
+			} else if (hold_combo && comboMatches(hold_combo, code)) {
+				if (!is_recording) {
+					startRecording('hold', code, false);
 				}
 			}
 		}
@@ -676,8 +740,10 @@ function handleKeyEvent(code, value) {
 		// Key Release
 		held_keys.delete(code);
 
-		if (is_recording && active_trigger_type === 'hold') {
-			if (hold_combo && hold_combo.includes(code)) {
+		if (is_recording) {
+			if (active_trigger_type === 'hold' && hold_combo && comboContainsKey(hold_combo, code)) {
+				stopRecording();
+			} else if (active_trigger_type === 'translate_hold' && translate_hold_combo && comboContainsKey(translate_hold_combo, code)) {
 				stopRecording();
 			}
 		}

@@ -23,5 +23,7 @@ You can configure several options in your `.env` file:
 - `GEMINI_MODEL`: The model to use (default: `gemini-3.5-flash`).
 - `HOLD_KEY`: Key to press and hold to record (e.g., `KEY_RIGHTALT`).
 - `TOGGLE_KEYS`: Key combinations to toggle recording (e.g., `KEY_LEFTCTRL+KEY_RIGHTALT`).
+- `TRANSLATE_HOLD_KEY`: Key combination to press and hold to record and translate the spoken audio into English (e.g., `KEY_LEFTSHIFT+KEY_LEFTALT`).
+- `TRANSLATE_TOGGLE_KEYS`: Key combinations to toggle recording start/stop and translate the spoken audio into English (e.g., `KEY_LEFTSHIFT+KEY_LEFTCTRL+KEY_LEFTALT`).
 - `KEYBOARD_LAYOUT`: Set to your keyboard layout (e.g., `fr` or `azerty` for French layout, `de` or `qwertz` for German, or leave blank/`us` for standard US QWERTY).
 - `LANGUAGE`: The expected spoken language (e.g., `French`, `German`, `English`) to improve transcription accuracy.
