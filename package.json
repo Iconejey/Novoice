@@ -1,0 +1,12 @@
+{
+  "name": "novoice",
+  "version": "1.0.0",
+  "description": "AI-Powered speech-to-text program that types what you say designed for Arch Linux with Hyprland",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "Nicolas",
+  "license": "MIT",
+  "dependencies": {}
+}
