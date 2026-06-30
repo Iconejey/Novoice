@@ -552,7 +552,7 @@ function startRecording(trigger_type, trigger_key, should_translate = false) {
 	console.log(`\n=== Recording Started (${trigger_type} via ${names[trigger_key] || trigger_key}${should_translate ? ' - TRANSLATE TO ENGLISH' : ''}) ===`);
 
 	// Set border to Green
-	setBorderColor('0xff00ff00');
+	setBorderColor('0xffc3e88d');
 
 	// Remove stale audio files
 	try {
@@ -576,7 +576,7 @@ function startRecording(trigger_type, trigger_key, should_translate = false) {
 
 		try {
 			// Set border to Purple while processing
-			setBorderColor('0xffd142f5');
+			setBorderColor('0xffc792ea');
 
 			console.log('Trimming silence...');
 			await trimSilence();
