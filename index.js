@@ -638,6 +638,7 @@ const held_keys = new Set();
 
 function keysMatch(expected_code, actual_code) {
 	if (expected_code === actual_code) return true;
+	if (process.env.STRICT_MODIFIERS === 'true') return false;
 	const shift_codes = [42, 54];
 	const ctrl_codes = [29, 97];
 	const alt_codes = [56, 100];
