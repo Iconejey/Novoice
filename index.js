@@ -5,8 +5,9 @@ const { spawn, execSync } = require('child_process');
 
 // 1. ENVIRONMENT VARIABLES LOADING
 function loadEnv() {
-	if (fs.existsSync('.env')) {
-		const lines = fs.readFileSync('.env', 'utf8').split('\n');
+	const envPath = path.join(__dirname, '.env');
+	if (fs.existsSync(envPath)) {
+		const lines = fs.readFileSync(envPath, 'utf8').split('\n');
 		for (const line of lines) {
 			const trimmed = line.trim();
 			if (!trimmed || trimmed.startsWith('#')) continue;
@@ -282,6 +283,7 @@ let is_processing = false;
 let active_trigger_type = null; // 'hold' or 'toggle'
 let active_trigger_key = null; // numeric code
 let ffmpeg_process = null;
+let recording_start_time = 0;
 
 function trimSilence() {
 	return new Promise((resolve, reject) => {
@@ -548,6 +550,7 @@ function startRecording(trigger_type, trigger_key, should_translate = false) {
 	active_trigger_type = trigger_type;
 	active_trigger_key = trigger_key;
 	active_translation_mode = should_translate;
+	recording_start_time = Date.now();
 
 	console.log(`\n=== Recording Started (${trigger_type} via ${names[trigger_key] || trigger_key}${should_translate ? ' - TRANSLATE TO ENGLISH' : ''}) ===`);
 
@@ -570,11 +573,32 @@ function startRecording(trigger_type, trigger_key, should_translate = false) {
 	});
 
 	ffmpeg_process.on('close', async code => {
-		console.log(`Recording ffmpeg process stopped. Code: ${code}`);
+		const recording_duration = Date.now() - recording_start_time;
+		console.log(`Recording ffmpeg process stopped. Code: ${code}. Duration: ${recording_duration}ms`);
 		ffmpeg_process = null;
 		is_processing = true;
 
 		try {
+			// Discard quick system shortcuts and short taps (less than 400ms)
+			if (recording_duration < 400) {
+				console.log(`Recording duration is too short (${recording_duration}ms). Discarding as a quick shortcut or accidental tap.`);
+				restoreDefaultBorder();
+				return;
+			}
+
+			if (!fs.existsSync(raw_audio_path)) {
+				console.log('Raw audio file does not exist. Discarding.');
+				restoreDefaultBorder();
+				return;
+			}
+
+			const raw_stats = fs.statSync(raw_audio_path);
+			if (raw_stats.size <= 200) {
+				console.log(`Raw audio file is too small (${raw_stats.size} bytes). Discarding.`);
+				restoreDefaultBorder();
+				return;
+			}
+
 			// Set border to Purple while processing
 			setBorderColor('0xffc792ea');
 
